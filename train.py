@@ -8,6 +8,7 @@ from functools import partial
 import torch as tc
 
 from rl2.envs.bandit_env import BanditEnv
+from rl2.envs.adversarial_bandit_env import AdversarialBanditEnv
 from rl2.envs.mdp_env import MDPEnv
 
 from rl2.agents.preprocessing.tabular import MABPreprocessing, MDPPreprocessing
@@ -30,9 +31,9 @@ from rl2.utils.optim_util import get_weight_decay_param_groups
 def create_argparser():
     parser = argparse.ArgumentParser(
         description="""Training script for RL^2.""")
-
+    parser.add_argument("--train_or_eval", choices=['train', 'eval'], default='train')
     ### Environment
-    parser.add_argument("--environment", choices=['bandit', 'tabular_mdp'],
+    parser.add_argument("--environment", choices=['bandit', 'tabular_mdp', 'adversarial_bandit'],
                         default='bandit')
     parser.add_argument("--num_states", type=int, default=10,
                         help="Ignored if environment is bandit.")
@@ -74,6 +75,9 @@ def create_env(environment, num_states, num_actions, max_episode_len):
     if environment == 'bandit':
         return BanditEnv(
             num_actions=num_actions)
+    if environment == 'adversarial_bandit':
+        return AdversarialBanditEnv(
+            num_actions=num_actions)
     if environment == 'tabular_mdp':
         return MDPEnv(
             num_states=num_states,
@@ -83,7 +87,7 @@ def create_env(environment, num_states, num_actions, max_episode_len):
 
 
 def create_preprocessing(environment, num_states, num_actions):
-    if environment == 'bandit':
+    if environment == 'bandit' or environment == 'adversarial_bandit':
         return MABPreprocessing(
             num_actions=num_actions)
     if environment == 'tabular_mdp':
@@ -168,6 +172,10 @@ def create_net(
 def main():
     args = create_argparser().parse_args()
     comm = get_comm()
+
+    # validate that if we are evaluating, then there's a checkpoint to load.
+    if args.evaluate and args.checkpoint_dir is None:
+        raise ValueError("Must provide checkpoint_dir to load from if evaluating.")
 
     # create env.
     env = create_env(
@@ -271,29 +279,37 @@ def main():
     else:
         meta_episodes_per_policy_update = args.meta_episodes_per_policy_update
 
-    training_loop(
-        env=env,
-        policy_net=policy_net,
-        value_net=value_net,
-        policy_optimizer=policy_optimizer,
-        value_optimizer=value_optimizer,
-        policy_scheduler=policy_scheduler,
-        value_scheduler=value_scheduler,
-        meta_episodes_per_policy_update=meta_episodes_per_policy_update,
-        meta_episodes_per_learner_batch=args.meta_episodes_per_learner_batch,
-        meta_episode_len=args.meta_episode_len,
-        ppo_opt_epochs=args.ppo_opt_epochs,
-        ppo_clip_param=args.ppo_clip_param,
-        ppo_ent_coef=args.ppo_ent_coef,
-        discount_gamma=args.discount_gamma,
-        gae_lambda=args.gae_lambda,
-        standardize_advs=bool(args.standardize_advs),
-        max_pol_iters=args.max_pol_iters,
-        pol_iters_so_far=pol_iters_so_far,
-        policy_checkpoint_fn=policy_checkpoint_fn,
-        value_checkpoint_fn=value_checkpoint_fn,
-        comm=comm)
-
+    if args.train_or_eval == 'train':
+        training_loop(
+            env=env,
+            policy_net=policy_net,
+            value_net=value_net,
+            policy_optimizer=policy_optimizer,
+            value_optimizer=value_optimizer,
+            policy_scheduler=policy_scheduler,
+            value_scheduler=value_scheduler,
+            meta_episodes_per_policy_update=meta_episodes_per_policy_update,
+            meta_episodes_per_learner_batch=args.meta_episodes_per_learner_batch,
+            meta_episode_len=args.meta_episode_len,
+            ppo_opt_epochs=args.ppo_opt_epochs,
+            ppo_clip_param=args.ppo_clip_param,
+            ppo_ent_coef=args.ppo_ent_coef,
+            discount_gamma=args.discount_gamma,
+            gae_lambda=args.gae_lambda,
+            standardize_advs=bool(args.standardize_advs),
+            max_pol_iters=args.max_pol_iters,
+            pol_iters_so_far=pol_iters_so_far,
+            policy_checkpoint_fn=policy_checkpoint_fn,
+            value_checkpoint_fn=value_checkpoint_fn,
+            comm=comm)
+    else:
+        evaluation_loop(
+            env=env,
+            policy_net=policy_net,
+            value_net=value_net,
+            meta_episode_len=args.meta_episode_len,
+            num_eval_episodes=args.max_pol_iters,
+            comm=comm)
 
 if __name__ == '__main__':
     main()

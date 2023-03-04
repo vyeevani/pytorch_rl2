@@ -60,3 +60,17 @@ class MetaEpisodicEnv(abc.ABC, Generic[ObsType]):
             next observation, reward, and done flat
         """
         pass
+
+    @abc.abstractmethod
+    def train(self):
+        """
+        Switch to training mode.
+        """
+        pass
+
+    @abc.abstractmethod
+    def test(self):
+        """
+        Switch to testing mode.
+        """
+        pass

@@ -174,6 +174,7 @@ def training_loop(
     Returns:
         None
     """
+    env.train()
     meta_ep_returns = deque(maxlen=1000)
 
     for pol_iter in range(pol_iters_so_far, max_pol_iters):
@@ -268,3 +269,36 @@ def training_loop(
             print("-" * 100)
             policy_checkpoint_fn(pol_iter + 1)
             value_checkpoint_fn(pol_iter + 1)
+
+def evaluation_loop(
+    env: MetaEpisodicEnv, 
+    policy_net: StatefulPolicyNet,
+    value_net: StatefulValueNet,
+    meta_episode_len: int,
+    num_eval_episodes: int,
+    discount_gamma: float,
+    gae_lambda: float,
+    comm: type(MPI.COMM_WORLD)
+) -> None:
+    env.test()
+    meta_ep_returns = deque(maxlen=1000)
+    for _ in range(num_eval_episodes):
+        meta_episode = generate_meta_episode(
+            env=env,
+            policy_net=policy_net,
+            value_net=value_net,
+            meta_episode_len=meta_episode_len
+        )
+        meta_episode = assign_credit(
+            meta_episode=meta_episode,
+            gamma=discount_gamma,
+            lam=gae_lambda
+        )
+        l_meta_ep_returns = [np.sum(meta_episode.rews)]
+        g_meta_ep_returns = comm.allgather(l_meta_ep_returns)
+        g_meta_ep_returns = [x for loc in g_meta_ep_returns for x in loc]
+        meta_ep_returns.extend(g_meta_ep_returns)
+    if comm.Get_rank() == ROOT_RANK:
+            print("-" * 100)
+            print(f"mean meta-episode return: {np.mean(meta_ep_returns):>0.3f}")
+            print("-" * 100)
